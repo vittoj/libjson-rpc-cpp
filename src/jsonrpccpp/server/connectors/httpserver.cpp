@@ -9,6 +9,7 @@
 
 #include "httpserver.h"
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <jsonrpccpp/common/specificationparser.h>
 #include <sstream>
@@ -26,10 +27,10 @@ struct mhd_coninfo {
   int code;
 };
 
-HttpServer::HttpServer(int port, const std::string &sslcert,
+HttpServer::HttpServer(int port, const std::string& ip_addr, const std::string &sslcert,
                        const std::string &sslkey, int threads)
-    : AbstractServerConnector(), port(port), threads(threads), running(false),
-      path_sslcert(sslcert), path_sslkey(sslkey), daemon(NULL) {}
+    : AbstractServerConnector(), port(port), ip_addr(ip_addr), threads(threads),
+      path_sslcert(sslcert), path_sslkey(sslkey), running(false), daemon(NULL) {}
 
 IClientConnectionHandler *HttpServer::GetHandler(const std::string &url) {
   if (AbstractServerConnector::GetHandler() != NULL)
@@ -49,16 +50,26 @@ bool HttpServer::StartListening() {
         (MHD_is_feature_supported(MHD_FEATURE_POLL) == MHD_YES);
     unsigned int mhd_flags;
     if (has_epoll)
+#if defined(MHD_USE_EPOLL_INTERNAL_THREAD)
+    mhd_flags = MHD_USE_EPOLL_INTERNAL_THREAD;
+#elif defined(MHD_USE_EPOLL_INTERNALLY)
 // In MHD version 0.9.44 the flag is renamed to
 // MHD_USE_EPOLL_INTERNALLY_LINUX_ONLY. In later versions both
 // are deprecated.
-#if defined(MHD_USE_EPOLL_INTERNALLY)
       mhd_flags = MHD_USE_EPOLL_INTERNALLY;
 #else
       mhd_flags = MHD_USE_EPOLL_INTERNALLY_LINUX_ONLY;
 #endif
     else if (has_poll)
       mhd_flags = MHD_USE_POLL_INTERNALLY;
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(this->port);
+    if (ip_addr.size() != 0)
+      inet_pton(AF_INET, ip_addr.c_str(), &(server_addr.sin_addr));
+    else
+      server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     if (this->path_sslcert != "" && this->path_sslkey != "") {
       try {
         SpecificationParser::GetFileContent(this->path_sslcert, this->sslcert);
@@ -69,6 +80,7 @@ bool HttpServer::StartListening() {
             HttpServer::callback, this, MHD_OPTION_HTTPS_MEM_KEY,
             this->sslkey.c_str(), MHD_OPTION_HTTPS_MEM_CERT,
             this->sslcert.c_str(), MHD_OPTION_THREAD_POOL_SIZE, this->threads,
+            MHD_OPTION_SOCK_ADDR, (struct sockaddr *)(&server_addr),
             MHD_OPTION_END);
       } catch (JsonRpcException &ex) {
         return false;
@@ -76,7 +88,9 @@ bool HttpServer::StartListening() {
     } else {
       this->daemon = MHD_start_daemon(
           mhd_flags, this->port, NULL, NULL, HttpServer::callback, this,
-          MHD_OPTION_THREAD_POOL_SIZE, this->threads, MHD_OPTION_END);
+          MHD_OPTION_THREAD_POOL_SIZE, this->threads,
+          MHD_OPTION_SOCK_ADDR, (struct sockaddr *)(&server_addr),
+          MHD_OPTION_END);
     }
     if (this->daemon != NULL)
       this->running = true;

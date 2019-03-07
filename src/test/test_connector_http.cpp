@@ -198,10 +198,10 @@ TEST_CASE_METHOD(F, "test_http_server_longpost", TEST_MODULE) {
 }
 
 TEST_CASE("test_http_server_ssl", TEST_MODULE) {
-  HttpServer server(TEST_PORT, "/a/b/c", "/d/e/f");
+  HttpServer server(TEST_PORT, "", "/a/b/c", "/d/e/f");
   CHECK(server.StartListening() == false);
 
-  HttpServer server2(TEST_PORT, "server.pem", "server.key");
+  HttpServer server2(TEST_PORT, "", "server.pem", "server.key");
   CHECK(server2.StartListening() == true);
   server2.StopListening();
 }
